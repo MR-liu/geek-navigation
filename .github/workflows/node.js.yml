@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - prod
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Set up Node.js
+        uses: actions/setup-node@v1
+        with:
+          node-version: '12.13.0'
+      - run: node -v
+
+  clean:
+    needs: setup
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/prod'
+    steps:
+      - run: |
+          cd /home/wwwroot/nav.geekape.net/
+          rm -rf web server admin
+          pm2 stop all
+          pm2 delete all
+          echo "清空nav.geekape.net目录成功"
+        continue-on-error: true
+
+  build_admin:
+    needs: clean
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/prod'
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          path: 'geekape-nav-admin'
+      - run: yarn config set registry 'https://registry.npm.taobao.org'
+      - run: tyarn install
+        working-directory: ./geekape-nav-admin
+      - run: yarn build
+        working-directory: ./geekape-nav-admin
+      - run: |
+          mv dist admin
+          mv admin/ /home/wwwroot/nav.geekape.net/
+          echo "admin移动目录完成"
+        continue-on-error: true
+
+  build_server:
+    needs: build_admin
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/prod'
+    steps:
+      - run: mv geekape-nav-server/ /home/wwwroot/nav.geekape.net/
+      - run: |
+          mv geekape-nav-server server
+          cd server/
+          tyarn install
+          echo "server包安装完成"
+          rm -rf /home/wwwroot/nav.geekape.net/server/config/mongodb.ts
+          cp /home/wwwroot/nav.geekape.net/mongodb.ts /home/wwwroot/nav.geekape.net/server/config/
+          pm2 start npm --name "geekape-nav-server" -- run server
+          echo "pm2 server启动成功"
+        continue-on-error: true
+        working-directory: /home/wwwroot/nav.geekape.net/
+
+  build_main:
+    needs: build_server
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/prod'
+    steps:
+      - run: mv geekape-nav-main/ /home/wwwroot/nav.geekape.net/
+      - run: |
+          mv geekape-nav-main web
+          cd web/
+          tyarn install
+          echo "main包安装完成"
+          yarn build
+          echo "main打包完成，可以运行"
+          pm2 start npm --name "geekape-nav-main" -- run server
+          echo "pm2 main启动成功"
+        continue-on-error: true
+        working-directory: /home/wwwroot/nav.geekape.net/
